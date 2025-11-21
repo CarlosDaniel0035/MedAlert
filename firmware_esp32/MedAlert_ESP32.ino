@@ -6,8 +6,8 @@
 #include <time.h>
 
 // ---------- CONFIG WI-FI ----------
-const char* WIFI_SSID     = "ANDREA SILVA";
-const char* WIFI_PASSWORD = "220101dani";
+const char* WIFI_SSID     = "rede";
+const char* WIFI_PASSWORD = "senha";
 
 // ---------- CONFIG MQTT ----------
 const char* MQTT_BROKER   = "test.mosquitto.org";
