@@ -1,83 +1,127 @@
-MedAlert – Lembrete de Medicamentos com ESP32 e MQTT
+MedAlert – Relatório do Projeto
+1. Introdução
 
-Este projeto é um protótipo de lembrete de medicação usando ESP32, 2 displays OLED, LED, buzzer, botão físico e MQTT com um cliente em Python.
+O MedAlert é um protótipo de dispositivo IoT voltado para lembretes de medicação, desenvolvido utilizando um ESP32, dois displays OLED, LED, buzzer, botão físico e comunicação via MQTT com um cliente em Python.
 
-Ele foi desenvolvido como aplicação prática de IoT na área de Saúde (ODS 3 – Saúde e Bem-Estar).
+A proposta do projeto é apoiar o paciente no controle de horários de medicamentos, permitindo:
 
-🔌 Visão geral do sistema
+Definir alarmes de forma remota (via computador);
 
-O ESP32 conecta no Wi-Fi, sincroniza a hora via NTP e se conecta a um broker MQTT.
+Disparar avisos visuais e sonoros no horário configurado;
 
-Um script Python roda no computador, também conectado ao mesmo broker.
+Confirmar a tomada da medicação por meio de um botão físico;
 
-A comunicação acontece pelos tópicos:
+Exibir informações em tempo real sobre o estado do sistema.
 
-Comandos (PC → ESP32)
+O MedAlert se encaixa no contexto da ODS 3 – Saúde e Bem-Estar, demonstrando como tecnologias de IoT podem ser aplicadas para melhorar a adesão a tratamentos e o acompanhamento do uso de medicamentos.
+
+2. Objetivos do Projeto
+
+Objetivo geral
+
+Desenvolver um protótipo funcional de lembrete de medicamentos baseado em ESP32 e MQTT, com interface física (displays, LED, buzzer, botão) e interface remota (cliente Python).
+
+Objetivos específicos
+
+Implementar comunicação Wi-Fi e MQTT no ESP32;
+
+Integrar dois displays OLED para exibição de informações de status e do alarme;
+
+Utilizar NTP para obter data e hora reais;
+
+Receber comandos de alarme e teste via MQTT;
+
+Disparar um alarme sonoro/visual no horário programado;
+
+Permitir a confirmação da dose por meio de botão físico, registrando essa ação;
+
+Criar um cliente Python capaz de:
+
+Enviar comandos ao dispositivo;
+
+Exibir, em tempo real, os status enviados pelo ESP32.
+
+3. Arquitetura do Sistema
+
+O sistema é composto por dois blocos principais:
+
+Dispositivo embarcado (MedAlert – ESP32)
+Responsável por:
+
+Conectar à rede Wi-Fi;
+
+Sincronizar a hora via NTP;
+
+Conectar ao broker MQTT;
+
+Controlar displays, LED, buzzer e botão;
+
+Processar comandos recebidos via MQTT;
+
+Publicar estados e eventos.
+
+Cliente PC (Python + MQTT)
+Responsável por:
+
+Conectar ao mesmo broker MQTT;
+
+Oferecer um menu interativo no terminal;
+
+Enviar comandos para o ESP32 (testes e definição de alarmes);
+
+Exibir as mensagens de status que o ESP32 publica.
+
+Tópicos MQTT utilizados
+
+Comandos (PC → ESP32):
 medalert/cmd
 
-Comandos usados:
-
-1 → teste: LED pisca + bip no buzzer
-
-2 → desliga o LED
-
-SET_ALARM HH:MM → define um horário de alarme (ex.: SET_ALARM 08:30)
-
-Status (ESP32 → PC)
+Status (ESP32 → PC):
 medalert/status
 
-Exemplos de mensagens:
+Broker utilizado
 
-CMD_1_LED_ON_BEEP
+Broker público: test.mosquitto.org
 
-CMD_2_LED_OFF
+Porta: 1883
 
-ALARME_DEFINIDO HH:MM
+4. Funcionamento do Dispositivo (ESP32)
 
-ALARME_DISPARADO
+O ESP32 é responsável por toda a lógica embarcada do MedAlert.
 
-ALARME_CONFIRMADO
+4.1 Conectividade e tempo
 
-BOTAO_SEM_ALARMES
+Conecta ao Wi-Fi com SSID e senha configurados no firmware;
 
-Assim eu consigo mostrar para o professor a comunicação bidirecional entre o PC e o dispositivo IoT.
+Após conectar, sincroniza a hora com o servidor NTP (pool.ntp.org) usando fuso horário UTC-3 (Brasil);
 
-🧱 Hardware
+A data e hora atualizadas são exibidas no Display 1 (principal).
 
-ESP32
+4.2 Displays OLED
 
-2 x OLED I2C (SSD1306 128x64)
-
-OLED 1 (principal): SDA 21, SCL 22
-
-OLED 2 (status): SDA 32, SCL 33
-
-LED no pino D25
-
-Buzzer ativo no pino D27 (aciona em nível baixo)
-
-Botão no pino D26 (para GND, com INPUT_PULLUP)
-
-🖥️ O que cada display mostra
-Display 1 (principal)
+Display 1 (principal – SDA 21 / SCL 22)
+Exibe:
 
 Data (DD/MM/AAAA)
 
-Hora (HH:MM:SS) – via NTP (pool.ntp.org, fuso UTC-3)
+Hora (HH:MM:SS)
 
-Alarme: horário configurado ou “Nenhum”
+Status do alarme: horário configurado ou “Nenhum”
 
-Mensagens temporárias:
+Mensagens temporárias, como:
 
-comando recebido (CMD 1, CMD 2, SET_ALARM)
+CMD 1 recebido, CMD 2 recebido
 
-hora do remédio
+Alarme definido
 
-confirmação da dose
+Hora do remedio!
 
-mensagem quando o botão é apertado
+Dose confirmada
 
-Display 2 (status)
+Sem alarmes no momento
+
+Display 2 (status – SDA 32 / SCL 33)
+Exibe:
 
 WiFi: Conectado ou WiFi: Desconect.
 
@@ -87,118 +131,166 @@ Alarmes: X (quantidade de alarmes confirmados no dia)
 
 MQTT: Conectado ou MQTT: Desconect.
 
-MedAlert na última linha
+MedAlert na linha inferior
 
-⏰ Lógica do alarme
+4.3 Lógica de alarme
 
-No Python, o usuário escolhe a opção de definir alarme (por menu).
+O alarme é configurado via comando MQTT:
+SET_ALARM HH:MM
 
-O script pergunta:
+Quando esse comando é recebido:
 
-hora (0–23)
+O horário é armazenado em memória (alarmTimeStr);
 
-minutos (0–59)
+O display 1 mostra “Alarme definido” e o horário;
 
-O Python monta SET_ALARM HH:MM e envia para medalert/cmd.
+O LED pisca e o buzzer executa 3 bipes de confirmação;
 
-O ESP32:
+O ESP32 envia ALARME_DEFINIDO HH:MM para o PC.
 
-guarda esse horário,
+Periodicamente, o ESP32 compara a hora atual com o horário do alarme:
 
-mostra “Alarme definido” no display 1,
+Quando a hora atual HH:MM coincide com o horário configurado:
 
-faz 3 bipes intermitentes com o buzzer e LED piscando,
+O LED começa a piscar continuamente;
 
-envia ALARME_DEFINIDO HH:MM em medalert/status.
+O buzzer apita intermitente;
 
-Quando chega a hora do alarme
+O display 1 mostra Hora do remedio! e o horário;
 
-O ESP32 compara periodicamente a hora atual (HH:MM) com o horário do alarme.
+O ESP32 envia ALARME_DISPARADO para o PC.
 
-Quando bate:
+4.4 Botão de confirmação (D26)
 
-o LED começa a piscar,
+O botão tem três comportamentos distintos:
 
-o buzzer apita intermitente,
+Se o alarme estiver tocando
 
-o display 1 mostra Hora do remedio! e o horário,
+Ao pressionar o botão:
 
-o ESP32 envia ALARME_DISPARADO para o PC.
+LED e buzzer são desligados;
 
-Confirmação pelo botão
+dailyAlarmCount é incrementado (contador de alarmes do dia);
 
-Se o alarme estiver tocando e o botão (D26) for pressionado:
+o alarme é limpo (volta a “Nenhum”);
 
-o LED e o buzzer são desligados,
+o display 1 mostra Dose confirmada / Obrigado!;
 
-o contador de Alarmes no display 2 é incrementado,
+o ESP32 envia ALARME_CONFIRMADO no tópico de status.
 
-o alarme atual é apagado,
+Se não existir alarme configurado
 
-o display 1 mostra Dose confirmada / Obrigado!,
+Ao pressionar o botão:
 
-o ESP32 envia ALARME_CONFIRMADO via MQTT.
+LED pisca + buzzer emite um bip curto;
 
-Se não houver alarme configurado:
+display 1 mostra Sem alarmes no momento;
 
-o botão faz o LED piscar + um bip curto,
+ESP32 envia BOTAO_SEM_ALARMES.
 
-mostra Sem alarmes no momento,
+Se houver alarme programado, mas ainda não tiver dado o horário
 
-envia BOTAO_SEM_ALARMES.
+Ao pressionar o botão:
 
-Se houver alarme configurado, mas ainda não deu o horário:
+display 1 mostra Alarmes progr.: HH:MM.
 
-o botão mostra Alarmes progr.: HH:MM no display 1.
+5. Funcionamento do Cliente Python
 
-📂 Organização dos arquivos
+O script medalert_menu.py funciona como interface de testes e controle do MedAlert.
 
-Exemplo de organização (ajuste para o seu repo):
+5.1 Tecnologias
 
-firmware_esp32/MedAlert_ESP32.ino → código do ESP32 (Arduino)
+Linguagem: Python
 
-medalert_menu.py → cliente MQTT em Python (rodando no PC)
+Biblioteca MQTT: paho-mqtt
 
-🐍 Cliente Python (resumo)
+5.2 Funções principais
 
-Usa a biblioteca paho-mqtt.
+Conecta ao broker test.mosquitto.org:1883;
 
-Conecta no broker público: test.mosquitto.org:1883.
+Publica mensagens em medalert/cmd;
 
-Exibe um menu no terminal com opções:
+Se inscreve em medalert/status e imprime tudo o que o ESP32 envia.
 
-1 → LED + bip (teste)
+5.3 Menu interativo
 
-2 → LED OFF
+O script exibe um menu no terminal, por exemplo:
 
-3 → comando livre (texto)
+1 → Envia "1" (LED + bip de teste)
 
-5 → definir alarme (pergunta hora e minutos e monta SET_ALARM HH:MM)
+2 → Envia "2" (LED OFF)
 
-Mostra na tela tudo que o ESP32 envia em medalert/status, com logs do tipo:
+3 → Permite digitar um comando livre
 
-"[ESP32 -> PC] Topico: medalert/status Mensagem: ALARME_DEFINIDO 08:30"
+5 → Fluxo guiado para definir alarme:
 
-Isso ajuda na hora de apresentar o projeto, pois mostra claramente a troca de mensagens.
+pede HORA (0–23)
 
-🎯 Objetivo acadêmico
+pede MINUTOS (0–59)
 
-Demonstrar um protótipo funcional de IoT aplicado à saúde (lembrete de medicação).
+monta automaticamente SET_ALARM HH:MM e envia
 
-Integrar:
+A cada status publicado pelo ESP32 em medalert/status, o Python imprime no formato:
 
-hardware (ESP32 + periféricos),
+[ESP32 -> PC] Topico: medalert/status
+[ESP32 -> PC] Mensagem: ...
 
-comunicação em rede (Wi-Fi, MQTT),
+Isso ajuda a demonstrar para o professor a troca de mensagens entre o PC e o dispositivo em tempo real.
 
-sincronização de tempo (NTP),
+6. Testes e Validação
 
-aplicação de apoio no PC (Python).
+Foram realizados testes para validar:
 
-Mostrar, na prática, conceitos de:
+Conexão estável do ESP32 à rede Wi-Fi e ao broker MQTT;
 
-comunicação assíncrona via MQTT,
+Recepção e interpretação correta dos comandos:
 
-lógica de alarme com horário real,
+"1" → teste de LED + buzzer;
 
-interação homem-máquina (botão, display, feedback sonoro e visual).
+"2" → desligamento do LED;
+
+SET_ALARM HH:MM → configuração correta do horário do alarme;
+
+Exibição adequada das informações nos dois displays OLED;
+
+Disparo automático do alarme no horário especificado:
+
+LED piscando;
+
+buzzer apitando intermitente;
+
+mensagem de “Hora do remedio!” no display principal;
+
+Confirmação da dose através do botão:
+
+parada do alarme;
+
+incremento no contador de “Alarmes” no display de status;
+
+envio de ALARME_CONFIRMADO para o PC.
+
+Os resultados mostraram que o sistema consegue receber comandos remotos, disparar alarmes na hora correta e registrar a confirmação do paciente, com feedback visual, sonoro e digital (via MQTT).
+
+7. Conclusão
+
+O projeto MedAlert demonstra, na prática, uma solução de Internet das Coisas aplicada à saúde, integrando:
+
+Dispositivo embarcado com ESP32;
+
+Comunicação Wi-Fi e MQTT;
+
+Sincronização de horário via NTP;
+
+Interfaces físicas intuitivas (displays, LED, buzzer, botão);
+
+Cliente em Python para envio de comandos e monitoramento.
+
+Além de cumprir os requisitos acadêmicos, o protótipo mostra como é possível construir, com componentes acessíveis, um sistema de lembrete de medicação com interação local e remota, servindo como base para evoluções futuras, como:
+
+múltiplos alarmes;
+
+integração com aplicativos móveis;
+
+registro histórico das doses confirmadas;
+
+envio de alertas para familiares ou cuidadores.
