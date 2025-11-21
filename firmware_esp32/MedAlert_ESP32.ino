@@ -1,26 +1,3 @@
-// MedAlert – ESP32 + 2 OLED + WiFi + MQTT + LED + buzzer + botao
-// Comandos via MQTT no topico "medalert/cmd":
-//  "1" -> acende LED (D25), bip curto, incrementa contador de alarmes do dia e mostra msg
-//  "2" -> apaga LED e mostra msg
-//  "SET_ALARM HH:MM" -> define um horario de alarme (so pra exibir no display 1)
-//
-// Display 2 (status - OLED2):
-//  WiFi: Conectado/Desconect.
-//  IP: xxx.xxx.xxx.xxx
-//  Alarmes: X
-//  MQTT: Conectado/Descon.
-//  MedAlert
-//
-// Display 1 (principal - OLED1):
-//  Data: DD/MM/AAAA
-//  Hora: HH:MM:SS
-//  Alarme: HH:MM ou Nenhum
-//  + mensagens temporarias (CMD, botao)
-//
-// Botao (D26):
-//  Se NAO houver alarme programado -> LED pisca + bip + msg "Sem alarmes no momento"
-//  Se houver alarme programado      -> mostra "Alarmes progr.: HH:MM"
-
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Wire.h>
