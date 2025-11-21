@@ -1,168 +1,115 @@
-import time
-import threading
-from datetime import datetime, timedelta
-
 import paho.mqtt.client as mqtt
+from paho.mqtt.client import CallbackAPIVersion
 
-# para os popups:
-import tkinter as tk
-from tkinter import simpledialog, messagebox
+# =============== CONFIGURAÇÕES =====================
 
-BROKER = "broker.hivemq.com"
+BROKER = "test.mosquitto.org"
 PORT = 1883
 
-TOPIC_CMD = "projeto/remedio/cmd"
-TOPIC_STATUS = "projeto/remedio/status"
+TOPIC_CMD = "medalert/cmd"
+TOPIC_STATUS = "medalert/status"
 
-# ---- TK só para os pop-ups (sem janela principal) ----
-root = tk.Tk()
-root.withdraw()  # esconde a janela principal
+# =============== CALLBACKS =========================
 
-
-# ==== CALLBACKS MQTT ====
 def on_connect(client, userdata, flags, rc):
-    print("Conectado ao broker, codigo rc =", rc)
-    client.subscribe(TOPIC_STATUS)
-    print(f"Assinado em '{TOPIC_STATUS}' para receber mensagens do ESP32.\n")
-
+    print("Conectado ao broker, codigo de retorno:", rc)
+    if rc == 0:
+        print("Conexao OK!")
+        client.subscribe(TOPIC_STATUS)
+        print("Inscrito em", TOPIC_STATUS)
+    else:
+        print("Falha na conexao (veja o codigo acima).")
 
 def on_message(client, userdata, msg):
-    payload = msg.payload.decode()
-    print(f"[{msg.topic}] {payload}")
+    try:
+        payload = msg.payload.decode()
+    except UnicodeDecodeError:
+        payload = str(msg.payload)
 
+    # Log bonito para mostrar pro professor
+    print("\n[ESP32 -> PC] Topico:", msg.topic)
+    print("[ESP32 -> PC] Mensagem:", payload)
 
-# ==== ENVIO DE COMANDOS SIMPLES ====
-def send_cmd(cmd: str):
-    mqtt_client.publish(TOPIC_CMD, cmd)
-    print(f">>> Enviado: {cmd}")
+# =============== CLIENTE MQTT ======================
 
+client = mqtt.Client(
+    client_id="MedAlert_PC",
+    callback_api_version=CallbackAPIVersion.VERSION1
+)
 
-def cmd_on():
-    send_cmd("ON")
+client.on_connect = on_connect
+client.on_message = on_message
 
+client.connect(BROKER, PORT, 60)
+client.loop_start()
 
-def cmd_off():
-    send_cmd("OFF")
+# =============== MENU ==============================
 
-
-def cmd_alarm_manual():
-    # dispara alarme imediatamente
-    send_cmd("ALARME")
-
-
-def cmd_stop():
-    send_cmd("STOP")
-
-
-def cmd_beep():
-    send_cmd("BEEP")
-
-
-# ==== AGENDAMENTO DO ALARME (opção 5) ====
-def cmd_set_alarm_agendado():
-    # 1) pop-up para HORA
-    h = simpledialog.askinteger(
-        "Horario do remedio",
-        "Digite a HORA (0-23):",
-        minvalue=0,
-        maxvalue=23,
-        parent=root
-    )
-    if h is None:
-        print("Agendamento cancelado.")
-        return
-
-    # 2) pop-up para MINUTO
-    m = simpledialog.askinteger(
-        "Horario do remedio",
-        "Digite o MINUTO (0-59):",
-        minvalue=0,
-        maxvalue=59,
-        parent=root
-    )
-    if m is None:
-        print("Agendamento cancelado.")
-        return
-
-    hhmm = f"{h:02d}:{m:02d}"
-
-    # Envia para o ESP32 mostrar nos displays
-    send_cmd(f"SET_ALARM {hhmm}")
-
-    # Calcula o próximo horário no PC
-    agora = datetime.now()
-    horario_hoje = agora.replace(hour=h, minute=m, second=0, microsecond=0)
-    if horario_hoje <= agora:
-        # se o horário já passou hoje, agenda para amanhã
-        horario_alarme = horario_hoje + timedelta(days=1)
-    else:
-        horario_alarme = horario_hoje
-
-    print(f"Alarme programado para {horario_alarme.strftime('%d/%m %H:%M')}")
-
-    # Thread que espera até a hora e manda ALARME
-    def worker():
-        while True:
-            agora2 = datetime.now()
-            if agora2 >= horario_alarme:
-                send_cmd("ALARME")
-                print(">>> Alarme disparado automaticamente (comando ALARME enviado).")
-                break
-            time.sleep(1)
-
-    threading.Thread(target=worker, daemon=True).start()
-    messagebox.showinfo("Alarme agendado", f"Alarme definido para {hhmm}")
-
-
-# ---- MQTT global ----
-mqtt_client = mqtt.Client(client_id="PC-CONSOLE-Controller")
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
-
-print("Conectando ao broker MQTT...")
-mqtt_client.connect(BROKER, PORT, 60)
-mqtt_client.loop_start()  # loop de rede em segundo plano
-
-
-# ---- LOOP DO MENU DE TEXTO ----
 def mostrar_menu():
-    print("\n================ MENU MQTT =================")
-    print("1 - LED ON")
-    print("2 - LED OFF")
-    print("3 - Disparar alarme AGORA (manual)")
-    print("4 - Parar alarme (STOP)")
-    print("5 - Programar horario do remedio (abre pop-ups)")
-    print("0 - Sair")
-    print("===========================================\n")
+    print("\n===== MENU MEDALERT =====")
+    print("1 - LED ON + BIP (manda '1')")
+    print("2 - LED OFF (manda '2')")
+    print("3 - Comando livre (texto)")
+    print("4 - Sair")
+    print("5 - Definir alarme (SET_ALARM HH:MM)")
+    print("=========================")
 
+def definir_alarme():
+    try:
+        hora_str = input("Digite a HORA (0-23): ").strip()
+        hora = int(hora_str)
+        if not 0 <= hora <= 23:
+            print("Hora invalida. Use 0 a 23.")
+            return
+
+        minuto_str = input("Digite os MINUTOS (0-59): ").strip()
+        minuto = int(minuto_str)
+        if not 0 <= minuto <= 59:
+            print("Minuto invalido. Use 0 a 59.")
+            return
+
+        horario = f"{hora:02d}:{minuto:02d}"
+        comando = f"SET_ALARM {horario}"
+        client.publish(TOPIC_CMD, comando)
+        print("Enviado:", comando)
+
+    except ValueError:
+        print("Valor invalido. Use apenas numeros.")
+
+# =============== LOOP PRINCIPAL ====================
 
 try:
     while True:
         mostrar_menu()
-        opcao = input("Escolha uma opcao: ").strip()
+        opc = input("Escolha uma opcao (1-5): ").strip()
 
-        if opcao == "1":
-            cmd_on()
-        elif opcao == "2":
-            cmd_off()
-        elif opcao == "3":
-            cmd_alarm_manual()
-        elif opcao == "4":
-            cmd_stop()
-        elif opcao == "5":
-            cmd_set_alarm_agendado()
-        elif opcao == "0":
+        if opc == "1":
+            client.publish(TOPIC_CMD, "1")
+            print("Enviado: 1 (LED ON + BIP)")
+
+        elif opc == "2":
+            client.publish(TOPIC_CMD, "2")
+            print("Enviado: 2 (LED OFF)")
+
+        elif opc == "3":
+            comando = input("Digite o comando completo: ").strip()
+            if not comando:
+                print("Comando vazio, voltando ao menu.")
+                continue
+            client.publish(TOPIC_CMD, comando)
+            print("Enviado comando livre:", comando)
+
+        elif opc == "4":
             print("Saindo...")
             break
+
+        elif opc == "5":
+            definir_alarme()
+
         else:
-            print("Opcao invalida.")
-
-        # pequena pausa só pra ficar mais legível
-        time.sleep(0.3)
-
-except KeyboardInterrupt:
-    print("\nEncerrando pelo teclado...")
+            print("Opcao invalida, tente novamente.")
 
 finally:
-    mqtt_client.loop_stop()
-    mqtt_client.disconnect()
+    client.loop_stop()
+    client.disconnect()
+    print("Desconectado do broker.")
