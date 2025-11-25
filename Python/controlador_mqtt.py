@@ -1,5 +1,3 @@
-# MedAlert - Cliente MQTT em Python
-# PC <-> Broker MQTT <-> ESP32
 
 import time
 import paho.mqtt.client as mqtt
@@ -13,7 +11,7 @@ TOPIC_CMD = "medalert/cmd"
 TOPIC_STATUS = "medalert/status"
 
 
-# =================== CALLBACKS ===================
+# =================== CHAMADAS ===================
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
     print(f"[PC] Conectado ao broker {BROKER}:{PORT} (code={reason_code})")
@@ -134,3 +132,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
