@@ -6,20 +6,20 @@
 #include <time.h>
 
 // ---------- CONFIG WI-FI ----------
-const char* WIFI_SSID     = "rede";
-const char* WIFI_PASSWORD = "senha";
+const char* WIFI_SSID     = "ANDREA SILVA";
+const char* WIFI_PASSWORD = "220101dani";
 
 // ---------- CONFIG MQTT ----------
-const char* MQTT_BROKER   = "test.mosquitto.org";
+const char* MQTT_BROKER   = "broker.hivemq.com";
 const uint16_t MQTT_PORT  = 1883;
 
 const char* MQTT_TOPIC_CMD    = "medalert/cmd";
 const char* MQTT_TOPIC_STATUS = "medalert/status";
 
 // ---------- NTP / HORA ----------
-const long gmtOffset_sec     = -3 * 3600;  // Brasilia (UTC-3)
+const long gmtOffset_sec      = -3 * 3600;  // Brasilia (UTC-3)
 const int  daylightOffset_sec = 0;
-const char* ntpServer        = "pool.ntp.org";
+const char* ntpServer         = "pool.ntp.org";
 
 // ---------- PINOS ----------
 #define PIN_LED     25   // LED no D25
@@ -48,9 +48,9 @@ Adafruit_SSD1306 displayStatus(SCREEN_WIDTH, SCREEN_HEIGHT, &I2C_OLED2, -1); // 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-bool   hasAlarm        = false;
-String alarmTimeStr    = "";
-int    dailyAlarmCount = 0;
+bool   hasAlarm        = false;   // existe alarme programado?
+String alarmTimeStr    = "";      // "HH:MM"
+int    dailyAlarmCount = 0;       // qtde de alarmes disparados no dia
 
 // controle de mensagens temporarias no display 1
 bool           transientMessageActive = false;
@@ -59,6 +59,11 @@ unsigned long  lastInfoUpdate         = 0;
 const unsigned long INFO_INTERVAL     = 1000; // 1s
 
 bool lastButtonState = HIGH;
+
+// ---------- NOVO: CONTROLE DO ALARME TOCANDO ----------
+bool          alarmRinging       = false;   // alarme está tocando agora?
+unsigned long lastAlarmToggle    = 0;       // ultimo toggle LED/BUZZER
+bool          alarmOutputState   = false;   // estado atual (ON/OFF)
 
 // ---------- DISPLAY FUNÇÕES ----------
 
@@ -227,6 +232,61 @@ bool parseSetAlarm(const String& msg, String& timeStr) {
   return true;
 }
 
+// ---------- NOVO: VERIFICA SE É HORA DO ALARME (SEM BLOQUEAR) ----------
+void checkAlarm() {
+  // só dispara se tem alarme programado e ainda não está tocando
+  if (!hasAlarm || alarmRinging) return;
+
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return;
+  }
+
+  char buf[6];
+  strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+  String currentTime = String(buf);
+
+  if (currentTime == alarmTimeStr) {
+    Serial.print("[ESP32] ALARME DISPARADO em ");
+    Serial.println(currentTime);
+
+    showOnMainDisplay("ALARME!", alarmTimeStr);
+
+    String statusMsg = "ALARME_DISPARADO ";
+    statusMsg += alarmTimeStr;
+    mqttClient.publish(MQTT_TOPIC_STATUS, statusMsg.c_str(), false);
+
+    // marca que o alarme está tocando (piscando/bipando)
+    hasAlarm          = false;       // não re-disparar
+    alarmRinging      = true;
+    lastAlarmToggle   = millis();
+    alarmOutputState  = false;
+    dailyAlarmCount++;
+    updateStatusDisplay();
+  }
+}
+
+// ---------- NOVO: FAZ O LED E O BUZZER TOCAREM ENQUANTO O ALARME ESTÁ ATIVO ----------
+void handleAlarmRinging() {
+  if (!alarmRinging) return;
+
+  unsigned long now = millis();
+  const unsigned long interval = 250; // ms -> velocidade do pisca/bip
+
+  if (now - lastAlarmToggle >= interval) {
+    lastAlarmToggle  = now;
+    alarmOutputState = !alarmOutputState;
+
+    if (alarmOutputState) {
+      digitalWrite(PIN_LED, HIGH);
+      digitalWrite(PIN_BUZZER, LOW);   // buzzer ON
+    } else {
+      digitalWrite(PIN_LED, LOW);
+      digitalWrite(PIN_BUZZER, HIGH);  // buzzer OFF
+    }
+  }
+}
+
 // ---------- CALLBACK MQTT ----------
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String msg;
@@ -242,23 +302,22 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   if (String(topic) == MQTT_TOPIC_CMD) {
     if (msg == "1") {
-      // LED ON + bip + incrementa alarmes do dia
+      // LED ON + bip (LED FICA ACESO)
       Serial.println("[ESP32] CMD 1: LED ON + BIP");
-      digitalWrite(PIN_LED, HIGH);
-      beepShort(200);
-      dailyAlarmCount++;
-      digitalWrite(PIN_LED, LOW); // LED so pisca junto com o bip
-      showOnMainDisplay("CMD 1 recebido", "LED + BIP");
+      digitalWrite(PIN_LED, HIGH);   // deixa ligado
+      beepShort(200);                // só bip
+      showOnMainDisplay("CMD 1 recebido", "LED ON + BIP");
       updateStatusDisplay();
       mqttClient.publish(MQTT_TOPIC_STATUS, "CMD_1_LED_ON_BEEP", false);
     }
     else if (msg == "2") {
-      // LED OFF
-      Serial.println("[ESP32] CMD 2: LED OFF");
-      digitalWrite(PIN_LED, LOW);
+      // LED OFF + bip
+      Serial.println("[ESP32] CMD 2: LED OFF + BIP");
+      beepShort(200);
+      digitalWrite(PIN_LED, LOW);    // garante LED desligado
       digitalWrite(PIN_BUZZER, HIGH);
-      showOnMainDisplay("CMD 2 recebido", "LED OFF");
-      mqttClient.publish(MQTT_TOPIC_STATUS, "CMD_2_LED_OFF", false);
+      showOnMainDisplay("CMD 2 recebido", "LED OFF + BIP");
+      mqttClient.publish(MQTT_TOPIC_STATUS, "CMD_2_LED_OFF_BEEP", false);
     }
     else if (msg.startsWith("SET_ALARM")) {
       String t;
@@ -266,7 +325,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         hasAlarm     = true;
         alarmTimeStr = t;
         showOnMainDisplay("Alarme definido", alarmTimeStr);
-        String statusMsg = "ALARME_DEFINIDO " + alarmTimeStr;
+
+        // Bipa 3x ao definir alarme
+        for (int i = 0; i < 3; i++) {
+          beepShort(150);
+          delay(150);
+        }
+
+        String statusMsg = "ALARME_DEFINIDO ";
+        statusMsg += alarmTimeStr;
         mqttClient.publish(MQTT_TOPIC_STATUS, statusMsg.c_str(), false);
       }
     }
@@ -331,24 +398,45 @@ void loop() {
 
   mqttClient.loop();
 
+  // Verifica se chegou na hora do alarme (só marca para tocar)
+  checkAlarm();
+
+  // Faz o LED + buzzer piscarem/biparem enquanto o alarme estiver ativo
+  handleAlarmRinging();
+
   // ---- Leitura do botao (bordas) ----
   bool currentButton = digitalRead(PIN_BUTTON);
+
+  // Detecção de borda de subida -> botão apertado
   if (lastButtonState == HIGH && currentButton == LOW) {
-    // botao foi pressionado
-    if (!hasAlarm) {
-      // Sem alarmes no momento -> LED + bip + mensagem
-      Serial.println("[ESP32] Botao: sem alarmes no momento");
-      digitalWrite(PIN_LED, HIGH);
-      beepShort(200);
+
+    if (alarmRinging) {
+      // SE O ALARME ESTÁ TOCANDO: SILENCIA IMEDIATAMENTE
+      Serial.println("[ESP32] Botao: alarme silenciado");
+      alarmRinging = false;
       digitalWrite(PIN_LED, LOW);
-      showOnMainDisplay("Sem alarmes", "no momento");
-      mqttClient.publish(MQTT_TOPIC_STATUS, "BOTAO_SEM_ALARMES", false);
-    } else {
-      // Ha alarme(s) programado(s)
-      Serial.println("[ESP32] Botao: existem alarmes programados");
-      showOnMainDisplay("Alarmes progr.:", alarmTimeStr);
+      digitalWrite(PIN_BUZZER, HIGH);
+      showOnMainDisplay("Alarme silenciado");
+      mqttClient.publish(MQTT_TOPIC_STATUS, "ALARME_SILENCIADO", false);
+    }
+    else {
+      // Comportamento antigo (sem alarme tocando)
+      if (!hasAlarm) {
+        // Sem alarmes no momento -> LED + bip + mensagem
+        Serial.println("[ESP32] Botao: sem alarmes no momento");
+        digitalWrite(PIN_LED, HIGH);
+        beepShort(200);
+        digitalWrite(PIN_LED, LOW);
+        showOnMainDisplay("Sem alarmes", "no momento");
+        mqttClient.publish(MQTT_TOPIC_STATUS, "BOTAO_SEM_ALARMES", false);
+      } else {
+        // Ha alarme(s) programado(s)
+        Serial.println("[ESP32] Botao: existem alarmes programados");
+        showOnMainDisplay("Alarmes progr.:", alarmTimeStr);
+      }
     }
   }
+
   lastButtonState = currentButton;
 
   // ---- Controle das telas ----
